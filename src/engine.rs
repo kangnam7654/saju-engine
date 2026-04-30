@@ -1,4 +1,7 @@
-use crate::{self as saju, branches, daeun, daily, interpreter, monthly, ten_gods, types::*};
+use crate::{
+    self as saju, branches, daeun, daily, gongmang, interpreter, lucky, monthly, shinsal,
+    ten_gods, types::*,
+};
 use chrono::Datelike;
 use serde_json::{Value, json};
 
@@ -102,6 +105,9 @@ impl SajuEngine {
         let user_pillars = saju::calculate_four_pillars(year, month, day, hour);
         let detail = daily::calculate_daily_detail(&user_pillars, has_birth_time);
 
+        // v0.0.3 — 일간 + 가장 부족 오행 두 갈래 행운 아이템 (web /today 무료 노출용).
+        let lk = lucky::analyze(&user_pillars, has_birth_time);
+
         let hourly: Vec<Value> = detail
             .hourly_fortunes
             .iter()
@@ -142,6 +148,7 @@ impl SajuEngine {
                 "number": detail.lucky_items.number,
                 "direction": detail.lucky_items.direction,
             },
+            "lucky": lucky_to_json(&lk),
             "element_energy": detail.element_energy,
             "personality_summary": detail.personality_summary,
         });
@@ -165,6 +172,11 @@ impl SajuEngine {
         let personality = interpreter::personality(day_master);
         let balance_text = interpreter::element_balance_analysis(&balance);
         let gods_text = interpreter::ten_gods_outlook(&fp, has_birth_time);
+
+        // v0.0.3 콘텐츠 고도화 — 공망/신살/행운 아이템.
+        let gm = gongmang::analyze(&fp, has_birth_time);
+        let ss = shinsal::analyze(&fp, has_birth_time);
+        let lk = lucky::analyze(&fp, has_birth_time);
 
         let gender = input
             .get("gender")
@@ -215,6 +227,9 @@ impl SajuEngine {
             "personality": personality,
             "fortune_outlook": gods_text,
             "gender": gender,
+            "gongmang": gongmang_to_json(&gm),
+            "shinsal": ss.iter().map(shinsal_to_json).collect::<Vec<_>>(),
+            "lucky": lucky_to_json(&lk),
         });
 
         (result, version.to_string())
@@ -1021,6 +1036,78 @@ fn branch_info(branch: Branch) -> Value {
     })
 }
 
+/// 공망 결과를 web 친화 JSON으로. enum은 한국어/lowercase 키로 평탄화.
+fn gongmang_to_json(g: &gongmang::Gongmang) -> Value {
+    let palaces: Vec<&'static str> = g
+        .affected_palaces
+        .iter()
+        .map(|p| match p {
+            gongmang::Palace::Year => "year",
+            gongmang::Palace::Month => "month",
+            gongmang::Palace::Hour => "hour",
+        })
+        .collect();
+    let ten_gods: Vec<&'static str> = g.affected_ten_gods.iter().map(|t| t.korean()).collect();
+
+    json!({
+        "group_index": g.group_index,
+        "group_name": g.group_name,
+        "empty_branches": g.empty_branches.iter().map(|b| branch_info(*b)).collect::<Vec<_>>(),
+        "affected_palaces": palaces,
+        "affected_ten_gods": ten_gods,
+        "interpretation": g.interpretation,
+    })
+}
+
+/// 단일 신살 → JSON. kind는 영문 슬러그 + 한국어 라벨 둘 다 노출.
+fn shinsal_to_json(s: &shinsal::Shinsal) -> Value {
+    let (kind_slug, kind_korean) = match s.kind {
+        shinsal::ShinsalKind::Dohwa => ("dohwa", "도화살"),
+        shinsal::ShinsalKind::Yeokma => ("yeokma", "역마살"),
+        shinsal::ShinsalKind::Jangseong => ("jangseong", "장성살"),
+        shinsal::ShinsalKind::Banan => ("banan", "반안살"),
+        shinsal::ShinsalKind::Hwagae => ("hwagae", "화개살"),
+        shinsal::ShinsalKind::Baekho => ("baekho", "백호살"),
+        shinsal::ShinsalKind::Cheoneul => ("cheoneul", "천을귀인"),
+    };
+    let positions: Vec<&'static str> = s
+        .positions
+        .iter()
+        .map(|p| match p {
+            shinsal::ShinsalPosition::Year => "year",
+            shinsal::ShinsalPosition::Month => "month",
+            shinsal::ShinsalPosition::Day => "day",
+            shinsal::ShinsalPosition::Hour => "hour",
+        })
+        .collect();
+
+    json!({
+        "kind": kind_slug,
+        "kind_korean": kind_korean,
+        "positions": positions,
+        "intensity": s.intensity,
+        "modern_take": s.modern_take,
+    })
+}
+
+/// 행운 아이템 → 한국어 오행 라벨 포함 JSON.
+fn lucky_to_json(l: &lucky::LuckyItems) -> Value {
+    json!({
+        "primary": lucky_triple_to_json(&l.primary),
+        "supplementary": lucky_triple_to_json(&l.supplementary),
+        "interpretation": l.interpretation,
+    })
+}
+
+fn lucky_triple_to_json(t: &lucky::LuckyTriple) -> Value {
+    json!({
+        "element": t.element.korean(),
+        "color": t.color,
+        "numbers": t.numbers,
+        "direction": t.direction,
+    })
+}
+
 /// 해당 월의 일 수 계산
 fn days_in_month(year: i32, month: u32) -> u32 {
     // 다음 달 1일에서 하루를 빼면 이번 달 마지막 날
@@ -1079,5 +1166,107 @@ fn score_to_grade(score: i32) -> &'static str {
         60..=79 => "good",
         40..=59 => "normal",
         _ => "caution",
+    }
+}
+
+#[cfg(test)]
+mod content_depth_tests {
+    //! v0.0.3 콘텐츠 고도화 — saju/daily_detail JSON 응답에 신규 필드 anchor 잠금.
+    //! 다운스트림(lunawave web) UI가 의지하는 키 이름이 무심코 사라지지 않게 한다.
+
+    use super::*;
+    use serde_json::json;
+
+    fn saju_input_with_time() -> Value {
+        json!({
+            "birth_date": "1990-05-15",
+            "birth_time": "14:00",
+            "gender": "male",
+        })
+    }
+
+    #[test]
+    fn saju_response_includes_gongmang_shinsal_lucky() {
+        let (result, _v) = SajuEngine.generate("saju", &saju_input_with_time());
+
+        let gm = result.get("gongmang").expect("gongmang 필드 필수");
+        assert!(gm.get("group_index").is_some(), "gongmang.group_index");
+        assert!(gm.get("group_name").is_some(), "gongmang.group_name");
+        assert!(
+            gm.get("empty_branches")
+                .and_then(|v| v.as_array())
+                .map_or(false, |a| a.len() == 2),
+            "공망 지지는 항상 2개"
+        );
+        assert!(gm.get("interpretation").is_some(), "gongmang.interpretation");
+
+        let ss = result
+            .get("shinsal")
+            .and_then(|v| v.as_array())
+            .expect("shinsal은 배열");
+        // 신살은 0개일 수 있으나 배열 자체는 항상 존재.
+        for item in ss {
+            assert!(item.get("kind").is_some(), "각 신살에 kind 슬러그");
+            assert!(item.get("kind_korean").is_some(), "각 신살에 kind_korean");
+            assert!(item.get("positions").is_some(), "각 신살에 positions");
+            assert!(item.get("modern_take").is_some(), "각 신살에 modern_take");
+        }
+
+        let lk = result.get("lucky").expect("lucky 필드 필수");
+        let primary = lk.get("primary").expect("lucky.primary");
+        assert!(primary.get("element").is_some());
+        assert!(primary.get("color").is_some());
+        assert!(
+            primary
+                .get("numbers")
+                .and_then(|v| v.as_array())
+                .map_or(false, |a| a.len() == 2),
+            "행운 숫자 2개"
+        );
+        assert!(primary.get("direction").is_some());
+        assert!(lk.get("supplementary").is_some());
+        assert!(lk.get("interpretation").is_some());
+    }
+
+    #[test]
+    fn daily_detail_response_includes_new_lucky_alongside_legacy() {
+        let (result, _v) = SajuEngine.generate("daily_detail", &saju_input_with_time());
+
+        // 레거시 lucky_items는 그대로 — iOS 호환.
+        let legacy = result.get("lucky_items").expect("legacy lucky_items 유지");
+        assert!(legacy.get("color").is_some());
+        assert!(legacy.get("color_hex").is_some());
+        assert!(legacy.get("number").is_some());
+
+        // 신규 lucky (primary + supplementary).
+        let new_lucky = result.get("lucky").expect("신규 lucky 필드");
+        assert!(new_lucky.get("primary").is_some());
+        assert!(new_lucky.get("supplementary").is_some());
+    }
+
+    #[test]
+    fn shinsal_kind_slugs_are_lowercase_english() {
+        let (result, _v) = SajuEngine.generate("saju", &saju_input_with_time());
+        let ss = result.get("shinsal").and_then(|v| v.as_array()).unwrap();
+        let allowed = ["dohwa", "yeokma", "jangseong", "banan", "hwagae", "baekho", "cheoneul"];
+        for item in ss {
+            let k = item.get("kind").and_then(|v| v.as_str()).unwrap();
+            assert!(allowed.contains(&k), "예상치 못한 신살 슬러그: {}", k);
+        }
+    }
+
+    #[test]
+    fn gongmang_palaces_are_lowercase() {
+        let (result, _v) = SajuEngine.generate("saju", &saju_input_with_time());
+        let palaces = result
+            .get("gongmang")
+            .and_then(|g| g.get("affected_palaces"))
+            .and_then(|v| v.as_array())
+            .unwrap();
+        let allowed = ["year", "month", "hour"];
+        for p in palaces {
+            let s = p.as_str().unwrap();
+            assert!(allowed.contains(&s), "예상치 못한 궁 슬러그: {}", s);
+        }
     }
 }
