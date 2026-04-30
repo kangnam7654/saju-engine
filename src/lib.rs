@@ -42,6 +42,7 @@ pub mod elements;
 pub mod engine;
 pub mod gongmang;
 pub mod interpreter;
+pub mod lucky;
 pub mod monthly;
 pub mod pillars;
 pub mod shinsal;
