@@ -44,6 +44,7 @@ pub mod gongmang;
 pub mod interpreter;
 pub mod monthly;
 pub mod pillars;
+pub mod shinsal;
 pub mod tables;
 pub mod ten_gods;
 pub mod types;
