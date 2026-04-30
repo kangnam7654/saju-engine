@@ -40,6 +40,7 @@ pub mod daeun;
 pub mod daily;
 pub mod elements;
 pub mod engine;
+pub mod gongmang;
 pub mod interpreter;
 pub mod monthly;
 pub mod pillars;
