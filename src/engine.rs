@@ -1062,10 +1062,17 @@ fn gongmang_to_json(g: &gongmang::Gongmang) -> Value {
 /// 단일 신살 → JSON. kind는 영문 슬러그 + 한국어 라벨 둘 다 노출.
 fn shinsal_to_json(s: &shinsal::Shinsal) -> Value {
     let (kind_slug, kind_korean) = match s.kind {
+        shinsal::ShinsalKind::Geop => ("geop", "겁살"),
+        shinsal::ShinsalKind::Jae => ("jae", "재살"),
+        shinsal::ShinsalKind::Cheon => ("cheon", "천살"),
+        shinsal::ShinsalKind::Ji => ("ji", "지살"),
         shinsal::ShinsalKind::Dohwa => ("dohwa", "도화살"),
-        shinsal::ShinsalKind::Yeokma => ("yeokma", "역마살"),
+        shinsal::ShinsalKind::Wol => ("wol", "월살"),
+        shinsal::ShinsalKind::Mangsin => ("mangsin", "망신살"),
         shinsal::ShinsalKind::Jangseong => ("jangseong", "장성살"),
         shinsal::ShinsalKind::Banan => ("banan", "반안살"),
+        shinsal::ShinsalKind::Yeokma => ("yeokma", "역마살"),
+        shinsal::ShinsalKind::Yukae => ("yukae", "육해살"),
         shinsal::ShinsalKind::Hwagae => ("hwagae", "화개살"),
         shinsal::ShinsalKind::Baekho => ("baekho", "백호살"),
         shinsal::ShinsalKind::Cheoneul => ("cheoneul", "천을귀인"),
@@ -1248,7 +1255,10 @@ mod content_depth_tests {
     fn shinsal_kind_slugs_are_lowercase_english() {
         let (result, _v) = SajuEngine.generate("saju", &saju_input_with_time());
         let ss = result.get("shinsal").and_then(|v| v.as_array()).unwrap();
-        let allowed = ["dohwa", "yeokma", "jangseong", "banan", "hwagae", "baekho", "cheoneul"];
+        let allowed = [
+            "geop", "jae", "cheon", "ji", "dohwa", "wol", "mangsin",
+            "jangseong", "banan", "yeokma", "yukae", "hwagae", "baekho", "cheoneul",
+        ];
         for item in ss {
             let k = item.get("kind").and_then(|v| v.as_str()).unwrap();
             assert!(allowed.contains(&k), "예상치 못한 신살 슬러그: {}", k);
